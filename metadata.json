@@ -1,0 +1,6 @@
+{
+  "name": "Radar Emosi Kelas 11 SMA",
+  "description": "Game pencet emotikon interaktif untuk menggambarkan perasaan murid kelas 11 SMA hari ini di papan interaktif digital, dilengkapi grafik batang dan Canva Sheet anonim.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
