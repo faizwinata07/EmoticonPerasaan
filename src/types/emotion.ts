@@ -40,4 +40,4 @@ export interface FloatingItem {
   color: string;
 }
 
-export type ViewMode = 'interactive_board' | 'split_view' | 'analytics_chart' | 'canva_sheet';
+export type ViewMode = 'interactive_board' | 'split_view' | 'analytics_chart' | 'canva_sheet' | 'google_sheets';

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import confetti from 'canvas-confetti';
+import { User } from 'firebase/auth';
 import { EMOTIONS_KELAS_11 } from './data/emotions';
 import { EmotionItem, VoteRecord, FloatingItem, ViewMode } from './types/emotion';
 import {
@@ -11,14 +12,22 @@ import {
   formatWIBDate,
 } from './utils/storage';
 import { playBoingSound, playSuccessChime, playResetSound } from './utils/audio';
+import { initAuth, googleSignIn, logout } from './services/firebaseAuth';
+import {
+  ConnectedSheetInfo,
+  getSavedSheetInfo,
+  saveSheetInfo,
+  appendVoteToSheet,
+} from './services/googleSheets';
 import { SmartboardHeader } from './components/SmartboardHeader';
 import { EmotionButton } from './components/EmotionButton';
 import { FloatingParticles } from './components/FloatingParticles';
 import { LiveBarChart } from './components/LiveBarChart';
 import { CanvaSheetView } from './components/CanvaSheetView';
+import { GoogleSheetsDatabase } from './components/GoogleSheetsDatabase';
 import { ResetConfirmModal } from './components/ResetConfirmModal';
 import { ReflectionGuideModal } from './components/ReflectionGuideModal';
-import { Sparkles, Users, Award, HelpCircle } from 'lucide-react';
+import { Sparkles, Users, Award, HelpCircle, Database, CheckCircle2 } from 'lucide-react';
 
 export default function App() {
   const [votes, setVotes] = useState<VoteRecord[]>(() => loadSavedVotes());
@@ -29,6 +38,54 @@ export default function App() {
   const [isResetModalOpen, setIsResetModalOpen] = useState<boolean>(false);
   const [isGuideOpen, setIsGuideOpen] = useState<boolean>(false);
   const [lastVotedEmotion, setLastVotedEmotion] = useState<EmotionItem | null>(null);
+
+  // Google Workspace & Sheets state
+  const [user, setUser] = useState<User | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
+  const [connectedSheet, setConnectedSheet] = useState<ConnectedSheetInfo | null>(() => getSavedSheetInfo());
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<string>('');
+
+  // Initialize auth listener
+  useEffect(() => {
+    const unsubscribe = initAuth(
+      (authedUser, token) => {
+        setUser(authedUser);
+        setAccessToken(token);
+      },
+      () => {
+        setUser(null);
+        setAccessToken(null);
+      }
+    );
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogin = async () => {
+    setIsLoggingIn(true);
+    try {
+      const res = await googleSignIn();
+      if (res) {
+        setUser(res.user);
+        setAccessToken(res.accessToken);
+      }
+    } catch (err) {
+      console.error('Google Sign In error:', err);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    setUser(null);
+    setAccessToken(null);
+  };
+
+  const handleConnectedSheetChange = (info: ConnectedSheetInfo | null) => {
+    setConnectedSheet(info);
+    saveSheetInfo(info);
+  };
 
   // Compute live counts per emotion
   const counts = React.useMemo(() => {
@@ -106,7 +163,7 @@ export default function App() {
         );
       }, 2500);
 
-      // Create new anonymous record for Canva Sheet
+      // Create new anonymous record
       const newRecord: VoteRecord = {
         id: `vote-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         index: votes.length + 1,
@@ -123,7 +180,26 @@ export default function App() {
 
       setVotes((prev) => [...prev, newRecord]);
 
-      // Celebrate milestone touches (e.g., 20, 35, 50 votes)
+      // If Google Sheets database is connected, automatically sync this vote directly to cloud!
+      if (accessToken && connectedSheet) {
+        setCloudSyncStatus('Menyimpan ke Google Sheets...');
+        appendVoteToSheet(
+          accessToken,
+          connectedSheet.spreadsheetId,
+          connectedSheet.sheetTitle,
+          newRecord
+        )
+          .then(() => {
+            setCloudSyncStatus('Tersimpan di Google Sheets ✓');
+            setTimeout(() => setCloudSyncStatus(''), 3000);
+          })
+          .catch((err) => {
+            console.error('Failed to auto-append to Google Sheets', err);
+            setCloudSyncStatus('Gagal sync ke Sheets');
+          });
+      }
+
+      // Celebrate milestone touches (e.g., 15, 30, 45 votes)
       const nextTotal = votes.length + 1;
       if (nextTotal % 15 === 0) {
         try {
@@ -138,7 +214,7 @@ export default function App() {
         }
       }
     },
-    [votes.length, sessionName, isMuted]
+    [votes.length, sessionName, isMuted, accessToken, connectedSheet]
   );
 
   // Handle session reset
@@ -163,15 +239,24 @@ export default function App() {
         sessionName={sessionName}
         totalVotes={totalVotes}
         isMuted={isMuted}
+        isSheetConnected={Boolean(connectedSheet && accessToken)}
         onToggleMute={() => setIsMuted((prev) => !prev)}
         onResetPrompt={() => setIsResetModalOpen(true)}
         onOpenReflectionGuide={() => setIsGuideOpen(true)}
       />
 
       {/* Instructions Banner for Smartboard Classroom Use */}
-      <div className="bg-amber-400 text-slate-950 font-extrabold px-4 py-2 border-b-2 border-amber-500 text-center text-xs sm:text-sm flex items-center justify-center gap-2">
+      <div className="bg-amber-400 text-slate-950 font-extrabold px-4 py-2 border-b-2 border-amber-500 text-center text-xs sm:text-sm flex flex-wrap items-center justify-center gap-2">
         <Sparkles className="w-4 h-4 text-slate-900" />
         <span>Sentuh emotikon yang paling menggambarkan perasaanmu saat ini! (Pilihan tersimpan anonim secara otomatis)</span>
+
+        {connectedSheet && (
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-950 text-white text-[11px] font-bold ml-2">
+            <Database className="w-3 h-3 text-emerald-400" />
+            <span>DB: {connectedSheet.spreadsheetTitle.slice(0, 25)}...</span>
+            {cloudSyncStatus && <span className="text-emerald-300 font-mono">({cloudSyncStatus})</span>}
+          </span>
+        )}
       </div>
 
       {/* Main Content Area */}
@@ -193,7 +278,25 @@ export default function App() {
                 )}
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
+                {connectedSheet ? (
+                  <button
+                    onClick={() => setCurrentView('google_sheets')}
+                    className="flex items-center gap-1.5 text-xs font-extrabold text-emerald-700 hover:text-emerald-900 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-300 cursor-pointer"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Database Sheets Aktif</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setCurrentView('google_sheets')}
+                    className="flex items-center gap-1.5 text-xs font-extrabold text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-200 cursor-pointer"
+                  >
+                    <Database className="w-3.5 h-3.5" />
+                    <span>Hubungkan Google Sheets</span>
+                  </button>
+                )}
+
                 <button
                   onClick={() => setCurrentView('split_view')}
                   className="text-xs font-black text-indigo-600 hover:text-indigo-800 underline cursor-pointer"
@@ -222,7 +325,7 @@ export default function App() {
                 <div className="flex items-center gap-3">
                   <Award className="w-5 h-5 text-amber-500" />
                   <span className="text-sm font-bold text-slate-700">
-                    Ingin melihat analisis lengkap dan mengunduh data Canva Sheet?
+                    Ingin melihat analisis lengkap atau mengelola database Google Sheets?
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -231,6 +334,13 @@ export default function App() {
                     className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm cursor-pointer"
                   >
                     Buka Grafik Batang
+                  </button>
+                  <button
+                    onClick={() => setCurrentView('google_sheets')}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Database className="w-3.5 h-3.5" />
+                    Google Sheets Database
                   </button>
                   <button
                     onClick={() => setCurrentView('canva_sheet')}
@@ -286,13 +396,20 @@ export default function App() {
               totalVotes={totalVotes}
             />
 
-            {/* Bottom quick action to switch to Canva Sheet */}
-            <div className="flex justify-end">
+            {/* Bottom quick actions */}
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              <button
+                onClick={() => setCurrentView('google_sheets')}
+                className="px-5 py-2.5 rounded-xl bg-emerald-600 text-white font-bold text-sm hover:bg-emerald-700 shadow-md cursor-pointer flex items-center gap-2"
+              >
+                <Database className="w-4 h-4" />
+                Buka Database Google Sheets
+              </button>
               <button
                 onClick={() => setCurrentView('canva_sheet')}
                 className="px-5 py-2.5 rounded-xl bg-slate-900 text-white font-bold text-sm hover:bg-slate-800 shadow-md cursor-pointer"
               >
-                Lihat Lembar Data Lengkap (Canva Sheet) &rarr;
+                Lihat Canva Sheet &rarr;
               </button>
             </div>
           </div>
@@ -305,6 +422,27 @@ export default function App() {
               votes={votes}
               sessionName={sessionName}
               onClearSessionPrompt={() => setIsResetModalOpen(true)}
+            />
+          </div>
+        )}
+
+        {/* VIEW 5: GOOGLE SHEETS AS DATABASE */}
+        {currentView === 'google_sheets' && (
+          <div className="space-y-6">
+            <GoogleSheetsDatabase
+              user={user}
+              accessToken={accessToken}
+              isLoggingIn={isLoggingIn}
+              onLogin={handleLogin}
+              onLogout={handleLogout}
+              connectedSheet={connectedSheet}
+              onConnectedSheetChange={handleConnectedSheetChange}
+              localVotes={votes}
+              onSyncLocalVotesToSheet={(sheetVotes) => {
+                if (sheetVotes && sheetVotes.length > 0) {
+                  setVotes(sheetVotes);
+                }
+              }}
             />
           </div>
         )}
@@ -323,7 +461,7 @@ export default function App() {
               Panduan Guru BK
             </button>
             <span>·</span>
-            <span>Otomatis Tersimpan ke Canva Sheet</span>
+            <span>Database Cloud: Google Sheets</span>
           </div>
         </div>
       </footer>

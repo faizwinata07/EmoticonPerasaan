@@ -10,7 +10,8 @@ import {
   LayoutGrid,
   BarChart2,
   FileSpreadsheet,
-  Columns
+  Columns,
+  Database,
 } from 'lucide-react';
 
 interface SmartboardHeaderProps {
@@ -19,6 +20,7 @@ interface SmartboardHeaderProps {
   sessionName: string;
   totalVotes: number;
   isMuted: boolean;
+  isSheetConnected?: boolean;
   onToggleMute: () => void;
   onResetPrompt: () => void;
   onOpenReflectionGuide: () => void;
@@ -30,6 +32,7 @@ export const SmartboardHeader: React.FC<SmartboardHeaderProps> = ({
   sessionName,
   totalVotes,
   isMuted,
+  isSheetConnected = false,
   onToggleMute,
   onResetPrompt,
   onOpenReflectionGuide,
@@ -147,6 +150,22 @@ export const SmartboardHeader: React.FC<SmartboardHeaderProps> = ({
           >
             <FileSpreadsheet className="w-4 h-4" />
             Canva Sheet
+          </button>
+
+          <button
+            onClick={() => onViewChange('google_sheets')}
+            className={`
+              flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-extrabold transition-all cursor-pointer whitespace-nowrap
+              ${currentView === 'google_sheets'
+                ? 'bg-emerald-400 text-slate-950 shadow-md scale-102'
+                : 'text-slate-300 hover:text-white hover:bg-slate-700/50'}
+            `}
+          >
+            <Database className="w-4 h-4 text-emerald-400" />
+            <span>Google Sheets DB</span>
+            {isSheetConnected && (
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse ml-0.5" />
+            )}
           </button>
         </div>
 
